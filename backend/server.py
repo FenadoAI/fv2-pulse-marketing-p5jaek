@@ -65,6 +65,37 @@ class SearchResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ContactForm(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    email: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ContactFormCreate(BaseModel):
+    name: str
+    email: str
+
+
+class BlogPost(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    content: str
+    author: str
+    category: str
+    image_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BlogPostCreate(BaseModel):
+    title: str
+    content: str
+    author: str
+    category: str
+    image_url: Optional[str] = None
+
+
 def _ensure_db(request: Request):
     try:
         return request.app.state.db
@@ -234,6 +265,47 @@ async def get_agent_capabilities(request: Request):
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Error getting capabilities")
         return {"success": False, "error": str(exc)}
+
+
+@api_router.post("/contacts", response_model=ContactForm)
+async def create_contact(input: ContactFormCreate, request: Request):
+    db = _ensure_db(request)
+    contact_obj = ContactForm(**input.model_dump())
+    await db.contacts.insert_one(contact_obj.model_dump())
+    logger.info(f"New contact form submission: {contact_obj.name} ({contact_obj.email})")
+    return contact_obj
+
+
+@api_router.get("/contacts", response_model=List[ContactForm])
+async def get_contacts(request: Request):
+    db = _ensure_db(request)
+    contacts = await db.contacts.find().sort("timestamp", -1).to_list(1000)
+    return [ContactForm(**contact) for contact in contacts]
+
+
+@api_router.post("/blog", response_model=BlogPost)
+async def create_blog_post(input: BlogPostCreate, request: Request):
+    db = _ensure_db(request)
+    blog_post = BlogPost(**input.model_dump())
+    await db.blog_posts.insert_one(blog_post.model_dump())
+    logger.info(f"New blog post created: {blog_post.title}")
+    return blog_post
+
+
+@api_router.get("/blog", response_model=List[BlogPost])
+async def get_blog_posts(request: Request, limit: int = 10):
+    db = _ensure_db(request)
+    posts = await db.blog_posts.find().sort("created_at", -1).limit(limit).to_list(limit)
+    return [BlogPost(**post) for post in posts]
+
+
+@api_router.get("/blog/{post_id}", response_model=BlogPost)
+async def get_blog_post(post_id: str, request: Request):
+    db = _ensure_db(request)
+    post = await db.blog_posts.find_one({"id": post_id})
+    if not post:
+        raise HTTPException(status_code=404, detail="Blog post not found")
+    return BlogPost(**post)
 
 
 app.include_router(api_router)
